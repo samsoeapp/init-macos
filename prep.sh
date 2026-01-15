@@ -84,15 +84,19 @@ DEFAULTS_USER=(
   # Screenshots
   "com.apple.screencapture|location|__HOME__/Downloads|string"
   "com.apple.screencapture|type|png|string"
-  # Safari
-  "com.apple.Safari|IncludeDevelopMenu|true|bool"
-  "com.apple.Safari|WebKitDeveloperExtrasEnabledPreferenceKey|true|bool"
-  "com.apple.Safari|com.apple.Safari.ContentPageGroupIdentifier.WebKit2DeveloperExtrasEnabled|true|bool"
-  "com.apple.Safari|AutoFillFromAddressBook|false|bool"
-  "com.apple.Safari|AutoFillPasswords|false|bool"
-  "com.apple.Safari|AutoFillCreditCardData|false|bool"
-  "com.apple.Safari|AutoFillMiscellaneousForms|false|bool"
-  "com.apple.Safari|SendDoNotTrackHTTPHeader|true|bool"
+)
+
+# Safari defaults - handled separately due to sandboxed container on macOS 14+
+# Format: "key|value|type"
+SAFARI_DEFAULTS=(
+  "IncludeDevelopMenu|true|bool"
+  "WebKitDeveloperExtrasEnabledPreferenceKey|true|bool"
+  "com.apple.Safari.ContentPageGroupIdentifier.WebKit2DeveloperExtrasEnabled|true|bool"
+  "AutoFillFromAddressBook|false|bool"
+  "AutoFillPasswords|false|bool"
+  "AutoFillCreditCardData|false|bool"
+  "AutoFillMiscellaneousForms|false|bool"
+  "SendDoNotTrackHTTPHeader|true|bool"
 )
 
 # macOS defaults (admin-level, requires sudo) - format: "domain|key|value|type"
@@ -109,7 +113,7 @@ FAILURES=()
 WARNINGS=()
 SKIPPED=()
 STEP_NUM=0
-TOTAL_STEPS=14
+TOTAL_STEPS=15
 REVERT_DEFAULTS=false
 CLIENT_PROFILE=""
 SUDO_KEEPALIVE_PID=""
@@ -282,6 +286,23 @@ run_optional_admin() {
     log_warn "$desc (admin)"
     return 1
   fi
+}
+
+# -----------------------------------------------------------------------------
+# macOS Version Detection
+# -----------------------------------------------------------------------------
+
+# Get macOS major version number (e.g., 14 for Sonoma, 15 for Sequoia)
+get_macos_major_version() {
+  sw_vers -productVersion | cut -d '.' -f 1
+}
+
+# Check if macOS version is at least the specified version
+macos_version_at_least() {
+  local required_version=$1
+  local current_version
+  current_version=$(get_macos_major_version)
+  [[ "$current_version" -ge "$required_version" ]]
 }
 
 # -----------------------------------------------------------------------------
@@ -485,6 +506,119 @@ revert_defaults() {
       else
         defaults delete "$domain" "$key" >> "$LOG_FILE" 2>&1 && ((success_count++)) || log_warn "$desc"
       fi
+    fi
+  done
+  
+  echo "$success_count/$total"
+}
+
+# Apply Safari defaults - handles sandboxed container on macOS 14+ (Sonoma/Sequoia)
+# Usage: apply_safari_defaults "${SAFARI_DEFAULTS[@]}"
+apply_safari_defaults() {
+  local safari_settings=("$@")
+  local success_count=0
+  local fail_count=0
+  local total=${#safari_settings[@]}
+  
+  if [[ $total -eq 0 ]]; then
+    echo "0/0"
+    return 0
+  fi
+  
+  # Determine the correct domain/path based on macOS version
+  # macOS 14+ (Sonoma/Sequoia) uses sandboxed container
+  local safari_domain="com.apple.Safari"
+  local safari_container="${HOME}/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist"
+  local use_container=false
+  
+  if macos_version_at_least 14; then
+    use_container=true
+    log_verbose "macOS 14+ detected, using Safari container path"
+    
+    # Ensure Safari container exists
+    if [[ ! -f "$safari_container" ]]; then
+      log_warn "Safari preferences file not found at $safari_container"
+      log_warn "Safari may need to be launched first to create preferences"
+      echo "0/$total"
+      return 1
+    fi
+  fi
+  
+  local entry key value dtype
+  for entry in "${safari_settings[@]}"; do
+    [[ -z "$entry" ]] && continue
+    
+    IFS='|' read -r key value dtype <<< "$entry"
+    
+    # Determine type flag
+    local type_flag=""
+    case "$dtype" in
+      bool)   type_flag="-bool" ;;
+      string) type_flag="-string" ;;
+      int)    type_flag="-int" ;;
+      float)  type_flag="-float" ;;
+      *)      type_flag="-string" ;;
+    esac
+    
+    local desc="Set Safari $key"
+    local result=0
+    
+    if [[ "$use_container" == "true" ]]; then
+      # For macOS 14+, write directly to the container plist
+      defaults write "$safari_container" "$key" "$type_flag" "$value" >> "$LOG_FILE" 2>&1 || result=1
+    else
+      # For older macOS, use the standard domain
+      defaults write "$safari_domain" "$key" "$type_flag" "$value" >> "$LOG_FILE" 2>&1 || result=1
+    fi
+    
+    if [[ $result -eq 0 ]]; then
+      log_success "$desc = $value"
+      ((success_count++))
+    else
+      log_error "$desc"
+      ((fail_count++))
+    fi
+  done
+  
+  echo "$success_count/$total"
+  return $fail_count
+}
+
+# Revert Safari defaults
+# Usage: revert_safari_defaults "${SAFARI_DEFAULTS[@]}"
+revert_safari_defaults() {
+  local safari_settings=("$@")
+  local success_count=0
+  local total=${#safari_settings[@]}
+  
+  if [[ $total -eq 0 ]]; then
+    echo "0/0"
+    return 0
+  fi
+  
+  local safari_domain="com.apple.Safari"
+  local safari_container="${HOME}/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist"
+  local use_container=false
+  
+  if macos_version_at_least 14; then
+    use_container=true
+    if [[ ! -f "$safari_container" ]]; then
+      echo "0/$total"
+      return 0
+    fi
+  fi
+  
+  local entry key value dtype
+  for entry in "${safari_settings[@]}"; do
+    [[ -z "$entry" ]] && continue
+    
+    IFS='|' read -r key value dtype <<< "$entry"
+    local desc="Revert Safari $key"
+    
+    if [[ "$use_container" == "true" ]]; then
+      defaults delete "$safari_container" "$key" >> "$LOG_FILE" 2>&1 && ((success_count++)) || log_warn "$desc"
+    else
+      defaults delete "$safari_domain" "$key" >> "$LOG_FILE" 2>&1 && ((success_count++)) || log_warn "$desc"
     fi
   done
   
@@ -1248,7 +1382,25 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 10: Apply admin defaults
+  # Step 10: Apply Safari defaults (separate due to sandboxed container on macOS 14+)
+  # -------------------------------------------------------------------------
+  begin_step "Applying Safari defaults"
+  if [[ ${#SAFARI_DEFAULTS[@]} -eq 0 ]]; then
+    step_skip "none configured"
+  elif [[ "$REVERT_DEFAULTS" == "true" ]]; then
+    result=$(revert_safari_defaults "${SAFARI_DEFAULTS[@]}")
+    step_ok "reverted $result"
+  else
+    result=$(apply_safari_defaults "${SAFARI_DEFAULTS[@]}")
+    if [[ $? -eq 0 ]]; then
+      step_ok "$result"
+    else
+      step_fail "$result"
+    fi
+  fi
+  
+  # -------------------------------------------------------------------------
+  # Step 11: Apply admin defaults
   # -------------------------------------------------------------------------
   begin_step "Applying admin defaults"
   if [[ ${#DEFAULTS_ADMIN[@]} -eq 0 ]]; then
@@ -1268,7 +1420,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 11: Configure Dock
+  # Step 12: Configure Dock
   # -------------------------------------------------------------------------
   begin_step "Configuring Dock"
   filter_dock_items
@@ -1283,7 +1435,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 12: Set default browser
+  # Step 13: Set default browser
   # -------------------------------------------------------------------------
   begin_step "Setting default browser"
   if [[ -z "$DEFAULT_BROWSER" ]]; then
@@ -1295,14 +1447,14 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 13: Restart affected apps
+  # Step 14: Restart affected apps
   # -------------------------------------------------------------------------
   begin_step "Restarting affected apps"
   result=$(restart_affected_apps)
   step_ok "$result"
   
   # -------------------------------------------------------------------------
-  # Step 14: Complete
+  # Step 15: Complete
   # -------------------------------------------------------------------------
   begin_step "Finalizing"
   step_ok
