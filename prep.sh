@@ -15,7 +15,7 @@
 # -----------------------------------------------------------------------------
 # Version (update this with each commit: V1.XX where XX = commit count)
 # -----------------------------------------------------------------------------
-VERSION="V1.09"
+VERSION="V1.10"
 
 # -----------------------------------------------------------------------------
 # Shell Options
@@ -331,9 +331,10 @@ init_sudo() {
   log_to_file "Requesting sudo credentials..."
   printf "\nAdmin access is required. Please authenticate.\n"
   
-  # Read password securely
+  # Read password securely from /dev/tty (works even when stdin is piped)
   local sudo_password
-  read -r -s -p "Password: " sudo_password
+  printf "Password: "
+  read -r -s sudo_password < /dev/tty
   printf "\n"
   
   # Test if password is correct
@@ -350,13 +351,16 @@ init_sudo() {
   chmod 600 "$SUDO_PASSWORD_FILE"
   printf '%s' "$sudo_password" > "$SUDO_PASSWORD_FILE"
   
+  # Export the path so subshells can access it
+  export SUDO_PASSWORD_FILE
+  
   # Clear password from memory
   sudo_password=""
   
   # Keep sudo timestamp alive as a primary mechanism
   (
     while true; do
-      sleep 10
+      sleep 5
       # Check if parent script is still running
       kill -0 "$$" 2>/dev/null || exit 0
       # Refresh sudo timestamp using stored password
@@ -374,7 +378,7 @@ init_sudo() {
 
 # Refresh sudo using stored password (call before operations that need sudo)
 refresh_sudo() {
-  if [[ -f "${SUDO_PASSWORD_FILE:-}" ]]; then
+  if [[ -n "${SUDO_PASSWORD_FILE:-}" && -f "$SUDO_PASSWORD_FILE" ]]; then
     cat "$SUDO_PASSWORD_FILE" | sudo -S -v >/dev/null 2>&1 || true
   else
     sudo -v >/dev/null 2>&1 || true
@@ -739,6 +743,11 @@ install_brew_casks() {
   local cask
   for cask in "${casks[@]}"; do
     [[ -z "$cask" ]] && continue
+    
+    # Refresh sudo before each cask (some have pkg installers that need sudo)
+    if [[ -n "${SUDO_PASSWORD_FILE:-}" && -f "$SUDO_PASSWORD_FILE" ]]; then
+      cat "$SUDO_PASSWORD_FILE" | sudo -S -v >/dev/null 2>&1 || true
+    fi
     
     log_verbose "Installing cask: $cask"
     if "$brew_cmd" install --cask "$cask" >> "$LOG_FILE" 2>&1; then
