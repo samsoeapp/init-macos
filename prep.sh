@@ -15,7 +15,7 @@
 # -----------------------------------------------------------------------------
 # Version (update this with each commit: V1.XX where XX = commit count)
 # -----------------------------------------------------------------------------
-VERSION="V1.08"
+VERSION="V1.09"
 
 # -----------------------------------------------------------------------------
 # Shell Options
@@ -314,6 +314,9 @@ macos_version_at_least() {
 # Sudo Management
 # -----------------------------------------------------------------------------
 
+# Temporary file for sudo password (securely stored)
+SUDO_PASSWORD_FILE=""
+
 init_sudo() {
   if [[ "$SUDO_INITIALIZED" == "true" ]]; then
     return 0
@@ -328,27 +331,38 @@ init_sudo() {
   log_to_file "Requesting sudo credentials..."
   printf "\nAdmin access is required. Please authenticate.\n"
   
-  # Step 1: Request sudo credentials (prompts for password)
-  sudo -v
+  # Read password securely
+  local sudo_password
+  read -r -s -p "Password: " sudo_password
+  printf "\n"
   
-  # Step 2: Test if sudo is working
-  if ! sudo -n true 2>/dev/null; then
-    log_error "Failed to obtain sudo credentials"
+  # Test if password is correct
+  if ! printf '%s\n' "$sudo_password" | sudo -S -v 2>/dev/null; then
+    log_error "Failed to obtain sudo credentials (incorrect password)"
     return 1
   fi
   
   log_to_file "Sudo credentials obtained successfully"
   
-  # Step 3: Keep sudo timestamp alive while the script runs
-  # This background process refreshes sudo every 10 seconds
-  # and exits when the parent script exits
+  # Store password securely in a temporary file for later use
+  # This is needed because Homebrew clears sudo timestamp during cask installations
+  SUDO_PASSWORD_FILE=$(mktemp)
+  chmod 600 "$SUDO_PASSWORD_FILE"
+  printf '%s' "$sudo_password" > "$SUDO_PASSWORD_FILE"
+  
+  # Clear password from memory
+  sudo_password=""
+  
+  # Keep sudo timestamp alive as a primary mechanism
   (
     while true; do
       sleep 10
       # Check if parent script is still running
       kill -0 "$$" 2>/dev/null || exit 0
-      # Refresh sudo timestamp (use -v to extend, not just validate)
-      sudo -v >/dev/null 2>&1 || exit 0
+      # Refresh sudo timestamp using stored password
+      if [[ -f "$SUDO_PASSWORD_FILE" ]]; then
+        cat "$SUDO_PASSWORD_FILE" | sudo -S -v >/dev/null 2>&1 || true
+      fi
     done
   ) &
   SUDO_KEEPALIVE_PID=$!
@@ -356,6 +370,15 @@ init_sudo() {
   SUDO_INITIALIZED=true
   log_success "Sudo initialized and keepalive started (PID: $SUDO_KEEPALIVE_PID)"
   return 0
+}
+
+# Refresh sudo using stored password (call before operations that need sudo)
+refresh_sudo() {
+  if [[ -f "${SUDO_PASSWORD_FILE:-}" ]]; then
+    cat "$SUDO_PASSWORD_FILE" | sudo -S -v >/dev/null 2>&1 || true
+  else
+    sudo -v >/dev/null 2>&1 || true
+  fi
 }
 
 ensure_sudo() {
@@ -369,6 +392,11 @@ cleanup_sudo() {
   if [[ -n "${SUDO_KEEPALIVE_PID:-}" ]]; then
     kill "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1 || true
     log_to_file "Sudo keepalive process stopped"
+  fi
+  # Securely remove the password file
+  if [[ -n "${SUDO_PASSWORD_FILE:-}" && -f "$SUDO_PASSWORD_FILE" ]]; then
+    rm -f "$SUDO_PASSWORD_FILE" 2>/dev/null || true
+    log_to_file "Sudo password file removed"
   fi
   # Invalidate sudo timestamp
   if command -v sudo >/dev/null 2>&1; then
@@ -1316,7 +1344,7 @@ main() {
     step_skip "none configured"
   else
     # Refresh sudo before installation
-    sudo -v >/dev/null 2>&1 || true
+    refresh_sudo
     result=$(install_brew_formulae "${BREW_FORMULAE[@]}")
     if [[ $? -eq 0 ]]; then
       step_ok "$result"
@@ -1333,7 +1361,7 @@ main() {
     step_skip "none configured"
   else
     # Refresh sudo before cask installation (some casks need sudo for pkg installers)
-    sudo -v >/dev/null 2>&1 || true
+    refresh_sudo
     result=$(install_brew_casks "${BREW_CASKS[@]}")
     if [[ $? -eq 0 ]]; then
       step_ok "$result"
