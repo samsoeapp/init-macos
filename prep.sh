@@ -15,7 +15,7 @@
 # -----------------------------------------------------------------------------
 # Version (update this with each commit: V1.XX where XX = commit count)
 # -----------------------------------------------------------------------------
-VERSION="V1.07"
+VERSION="V1.08"
 
 # -----------------------------------------------------------------------------
 # Shell Options
@@ -340,11 +340,11 @@ init_sudo() {
   log_to_file "Sudo credentials obtained successfully"
   
   # Step 3: Keep sudo timestamp alive while the script runs
-  # This background process refreshes sudo every 30 seconds
+  # This background process refreshes sudo every 10 seconds
   # and exits when the parent script exits
   (
     while true; do
-      sleep 30
+      sleep 10
       # Check if parent script is still running
       kill -0 "$$" 2>/dev/null || exit 0
       # Refresh sudo timestamp (use -v to extend, not just validate)
@@ -711,9 +711,6 @@ install_brew_casks() {
   local cask
   for cask in "${casks[@]}"; do
     [[ -z "$cask" ]] && continue
-    
-    # Refresh sudo before each cask install (some casks run pkg installers that need sudo)
-    sudo -v >/dev/null 2>&1 || true
     
     log_verbose "Installing cask: $cask"
     if "$brew_cmd" install --cask "$cask" >> "$LOG_FILE" 2>&1; then
@@ -1318,6 +1315,8 @@ main() {
   if [[ ${#BREW_FORMULAE[@]} -eq 0 ]]; then
     step_skip "none configured"
   else
+    # Refresh sudo before installation
+    sudo -v >/dev/null 2>&1 || true
     result=$(install_brew_formulae "${BREW_FORMULAE[@]}")
     if [[ $? -eq 0 ]]; then
       step_ok "$result"
@@ -1333,6 +1332,8 @@ main() {
   if [[ ${#BREW_CASKS[@]} -eq 0 ]]; then
     step_skip "none configured"
   else
+    # Refresh sudo before cask installation (some casks need sudo for pkg installers)
+    sudo -v >/dev/null 2>&1 || true
     result=$(install_brew_casks "${BREW_CASKS[@]}")
     if [[ $? -eq 0 ]]; then
       step_ok "$result"
