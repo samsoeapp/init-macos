@@ -15,7 +15,7 @@
 # -----------------------------------------------------------------------------
 # Version (update this with each commit: V1.XX where XX = commit count)
 # -----------------------------------------------------------------------------
-VERSION="V1.10"
+VERSION="V1.11"
 
 # -----------------------------------------------------------------------------
 # Shell Options
@@ -126,9 +126,7 @@ SUDO_INITIALIZED=false
 ACCEPT_XCODE_LICENSE=false
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${0}}")" && pwd)"
 
-# Step result tracking
-declare -A STEP_RESULTS
-declare -A STEP_DETAILS
+# Step result tracking (not used, kept for potential future use)
 
 # -----------------------------------------------------------------------------
 # Logging and Output Functions
@@ -202,22 +200,16 @@ step_start() {
 
 step_ok() {
   local detail="${1:-}"
-  STEP_RESULTS[$STEP_NUM]="OK"
-  STEP_DETAILS[$STEP_NUM]="$detail"
   print_step "$STEP_NUM" "$TOTAL_STEPS" "${CURRENT_STEP_DESC:-Step}" "OK" "$detail"
 }
 
 step_fail() {
   local detail="${1:-}"
-  STEP_RESULTS[$STEP_NUM]="FAILED"
-  STEP_DETAILS[$STEP_NUM]="$detail"
   print_step "$STEP_NUM" "$TOTAL_STEPS" "${CURRENT_STEP_DESC:-Step}" "FAILED" "$detail"
 }
 
 step_skip() {
   local detail="${1:-}"
-  STEP_RESULTS[$STEP_NUM]="SKIPPED"
-  STEP_DETAILS[$STEP_NUM]="$detail"
   print_step "$STEP_NUM" "$TOTAL_STEPS" "${CURRENT_STEP_DESC:-Step}" "SKIPPED" "$detail"
 }
 
