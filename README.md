@@ -9,12 +9,15 @@ Run directly from the web without cloning:
 
 ```bash
 # Default profile
+curl -fsSL https://craftu.re/macos | bash
 curl -fsSL https://raw.githubusercontent.com/samsoeapp/init-macos/main/prep.sh | bash
 
 # With a specific client profile
+curl -fsSL https://craftu.re/macos | bash -s -- --client acme
 curl -fsSL https://raw.githubusercontent.com/samsoeapp/init-macos/main/prep.sh | bash -s -- --client acme
 
 # Revert all defaults
+curl -fsSL https://craftu.re/macos | bash -s -- --revert
 curl -fsSL https://raw.githubusercontent.com/samsoeapp/init-macos/main/prep.sh | bash -s -- --revert
 ```
 
