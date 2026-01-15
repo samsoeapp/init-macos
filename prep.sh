@@ -15,7 +15,7 @@
 # -----------------------------------------------------------------------------
 # Version (update this with each commit: V1.XX where XX = commit count)
 # -----------------------------------------------------------------------------
-VERSION="V1.11"
+VERSION="V1.12"
 
 # -----------------------------------------------------------------------------
 # Shell Options
@@ -809,12 +809,65 @@ install_mas_apps() {
   return $fail_count
 }
 
-# Configure dock from array
+# Get dockutil command path
+get_dockutil_cmd() {
+  if command -v dockutil >/dev/null 2>&1; then
+    echo "dockutil"
+  elif [[ -x /opt/homebrew/bin/dockutil ]]; then
+    echo "/opt/homebrew/bin/dockutil"
+  elif [[ -x /usr/local/bin/dockutil ]]; then
+    echo "/usr/local/bin/dockutil"
+  else
+    echo ""
+  fi
+}
+
+# Verify dock configuration by checking if expected items are present
+# Returns 0 if dock matches expected items, 1 otherwise
+verify_dock() {
+  local items=("$@")
+  local dockutil_cmd
+  dockutil_cmd=$(get_dockutil_cmd)
+  
+  if [[ -z "$dockutil_cmd" ]]; then
+    return 1
+  fi
+  
+  # Get current dock items
+  local current_dock
+  current_dock=$("$dockutil_cmd" --list 2>/dev/null | cut -f1)
+  
+  # Check if each expected app is in the dock
+  local item app_name
+  local missing=0
+  for item in "${items[@]}"; do
+    [[ -z "$item" ]] && continue
+    [[ "$item" == "SPACER" ]] && continue
+    
+    # Extract app name from path
+    app_name=$(basename "$item" .app)
+    
+    if ! echo "$current_dock" | grep -q "$app_name"; then
+      log_verbose "Dock verification: missing $app_name"
+      ((missing++))
+    fi
+  done
+  
+  if [[ $missing -eq 0 ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+# Configure dock from array with retry logic
 # Usage: configure_dock "${DOCK_ITEMS[@]}"
 configure_dock() {
   local items=("$@")
   local success_count=0
   local total=${#items[@]}
+  local max_retries=5
+  local retry=0
   
   if [[ $total -eq 0 ]]; then
     echo "0/0"
@@ -822,47 +875,81 @@ configure_dock() {
   fi
   
   # Try to find dockutil if not in PATH
-  local dockutil_cmd=""
-  if command -v dockutil >/dev/null 2>&1; then
-    dockutil_cmd="dockutil"
-  elif [[ -x /opt/homebrew/bin/dockutil ]]; then
-    dockutil_cmd="/opt/homebrew/bin/dockutil"
-  elif [[ -x /usr/local/bin/dockutil ]]; then
-    dockutil_cmd="/usr/local/bin/dockutil"
-  else
+  local dockutil_cmd
+  dockutil_cmd=$(get_dockutil_cmd)
+  
+  if [[ -z "$dockutil_cmd" ]]; then
     log_warn "dockutil not installed, skipping dock configuration"
     echo "0/$total"
     return 1
   fi
   
-  # Clear existing dock items
-  "$dockutil_cmd" --remove all --no-restart >> "$LOG_FILE" 2>&1
-  log_success "Cleared dock items"
-  
-  local item
-  for item in "${items[@]}"; do
-    [[ -z "$item" ]] && continue
+  while [[ $retry -lt $max_retries ]]; do
+    success_count=0
     
-    if [[ "$item" == "SPACER" ]]; then
-      if "$dockutil_cmd" --add '' --type spacer --section apps --no-restart >> "$LOG_FILE" 2>&1; then
-        log_success "Add dock spacer"
-        ((success_count++))
-      else
-        log_warn "Add dock spacer"
-      fi
-    elif [[ -e "$item" ]]; then
-      if "$dockutil_cmd" --add "$item" --no-restart >> "$LOG_FILE" 2>&1; then
-        log_success "Add dock item: $item"
-        ((success_count++))
-      else
-        log_warn "Add dock item: $item"
-      fi
-    else
-      log_warn "Dock item not found: $item"
+    if [[ $retry -gt 0 ]]; then
+      log_verbose "Dock configuration retry $retry/$max_retries"
+      sleep 2
     fi
+    
+    # Clear existing dock items
+    "$dockutil_cmd" --remove all --no-restart >> "$LOG_FILE" 2>&1
+    if [[ $retry -eq 0 ]]; then
+      log_success "Cleared dock items"
+    fi
+    
+    local item
+    for item in "${items[@]}"; do
+      [[ -z "$item" ]] && continue
+      
+      if [[ "$item" == "SPACER" ]]; then
+        if "$dockutil_cmd" --add '' --type spacer --section apps --no-restart >> "$LOG_FILE" 2>&1; then
+          if [[ $retry -eq 0 ]]; then
+            log_success "Add dock spacer"
+          fi
+          ((success_count++))
+        else
+          if [[ $retry -eq 0 ]]; then
+            log_warn "Add dock spacer"
+          fi
+        fi
+      elif [[ -e "$item" ]]; then
+        if "$dockutil_cmd" --add "$item" --no-restart >> "$LOG_FILE" 2>&1; then
+          if [[ $retry -eq 0 ]]; then
+            log_success "Add dock item: $item"
+          fi
+          ((success_count++))
+        else
+          if [[ $retry -eq 0 ]]; then
+            log_warn "Add dock item: $item"
+          fi
+        fi
+      else
+        if [[ $retry -eq 0 ]]; then
+          log_warn "Dock item not found: $item"
+        fi
+      fi
+    done
+    
+    # Restart Dock to apply changes
+    killall Dock 2>/dev/null || true
+    sleep 2
+    
+    # Verify the dock configuration
+    if verify_dock "${items[@]}"; then
+      log_verbose "Dock configuration verified successfully"
+      echo "$success_count/$total"
+      return 0
+    fi
+    
+    ((retry++))
+    log_warn "Dock configuration verification failed, attempt $retry/$max_retries"
   done
   
+  # Return result even if verification failed after all retries
+  log_error "Dock configuration failed after $max_retries attempts"
   echo "$success_count/$total"
+  return 1
 }
 
 # Filter dock items array to only existing apps
@@ -1466,7 +1553,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 12: Configure Dock
+  # Step 12: Configure Dock (with retry and verification)
   # -------------------------------------------------------------------------
   begin_step "Configuring Dock"
   filter_dock_items
@@ -1477,7 +1564,11 @@ main() {
     log_skip "Dock configuration (dockutil not installed)"
   else
     result=$(configure_dock "${DOCK_ITEMS[@]}")
-    step_ok "$result items"
+    if [[ $? -eq 0 ]]; then
+      step_ok "$result items"
+    else
+      step_fail "$result items (verification failed)"
+    fi
   fi
   
   # -------------------------------------------------------------------------
