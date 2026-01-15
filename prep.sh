@@ -367,19 +367,22 @@ test_sudo() {
 # Array format: "domain|key|value|type"
 # Special: "-g" for global domain, "-currentHost|domain" for currentHost writes
 # Special: "__HOME__" in value is replaced with $HOME
-apply_defaults_from_array() {
-  local -n arr=$1
-  local use_sudo=${2:-false}
+# Usage: apply_defaults false "${DEFAULTS_USER[@]}" or apply_defaults true "${DEFAULTS_ADMIN[@]}"
+apply_defaults() {
+  local use_sudo=$1
+  shift
+  local defaults_arr=("$@")
   local success_count=0
   local fail_count=0
-  local total=${#arr[@]}
+  local total=${#defaults_arr[@]}
   
   if [[ $total -eq 0 ]]; then
+    echo "0/0"
     return 0
   fi
   
   local entry domain key value dtype
-  for entry in "${arr[@]}"; do
+  for entry in "${defaults_arr[@]}"; do
     # Skip empty entries
     [[ -z "$entry" ]] && continue
     
@@ -443,18 +446,21 @@ apply_defaults_from_array() {
 }
 
 # Revert defaults from array (delete the keys)
-revert_defaults_from_array() {
-  local -n arr=$1
-  local use_sudo=${2:-false}
+# Usage: revert_defaults false "${DEFAULTS_USER[@]}" or revert_defaults true "${DEFAULTS_ADMIN[@]}"
+revert_defaults() {
+  local use_sudo=$1
+  shift
+  local defaults_arr=("$@")
   local success_count=0
-  local total=${#arr[@]}
+  local total=${#defaults_arr[@]}
   
   if [[ $total -eq 0 ]]; then
+    echo "0/0"
     return 0
   fi
   
   local entry domain key value dtype
-  for entry in "${arr[@]}"; do
+  for entry in "${defaults_arr[@]}"; do
     [[ -z "$entry" ]] && continue
     
     IFS='|' read -r domain key value dtype <<< "$entry"
@@ -486,11 +492,12 @@ revert_defaults_from_array() {
 }
 
 # Install Homebrew formulae from array
-install_brew_formulae_from_array() {
-  local -n arr=$1
+# Usage: install_brew_formulae "${BREW_FORMULAE[@]}"
+install_brew_formulae() {
+  local formulae=("$@")
   local success_count=0
   local fail_count=0
-  local total=${#arr[@]}
+  local total=${#formulae[@]}
   
   if [[ $total -eq 0 ]]; then
     echo "0/0"
@@ -512,10 +519,10 @@ install_brew_formulae_from_array() {
   fi
   
   log_verbose "Using brew at: $brew_cmd"
-  log_verbose "Installing formulae: ${arr[*]}"
+  log_verbose "Installing formulae: ${formulae[*]}"
   
   local formula
-  for formula in "${arr[@]}"; do
+  for formula in "${formulae[@]}"; do
     [[ -z "$formula" ]] && continue
     
     log_verbose "Installing formula: $formula"
@@ -533,11 +540,12 @@ install_brew_formulae_from_array() {
 }
 
 # Install Homebrew casks from array
-install_brew_casks_from_array() {
-  local -n arr=$1
+# Usage: install_brew_casks "${BREW_CASKS[@]}"
+install_brew_casks() {
+  local casks=("$@")
   local success_count=0
   local fail_count=0
-  local total=${#arr[@]}
+  local total=${#casks[@]}
   
   if [[ $total -eq 0 ]]; then
     echo "0/0"
@@ -559,10 +567,10 @@ install_brew_casks_from_array() {
   fi
   
   log_verbose "Using brew at: $brew_cmd"
-  log_verbose "Installing casks: ${arr[*]}"
+  log_verbose "Installing casks: ${casks[*]}"
   
   local cask
-  for cask in "${arr[@]}"; do
+  for cask in "${casks[@]}"; do
     [[ -z "$cask" ]] && continue
     
     log_verbose "Installing cask: $cask"
@@ -581,11 +589,12 @@ install_brew_casks_from_array() {
 
 # Install MAS apps from array
 # Array format: "app_id|App Name"
-install_mas_from_array() {
-  local -n arr=$1
+# Usage: install_mas_apps "${MAS_APPS[@]}"
+install_mas_apps() {
+  local apps=("$@")
   local success_count=0
   local fail_count=0
-  local total=${#arr[@]}
+  local total=${#apps[@]}
   
   if [[ $total -eq 0 ]]; then
     echo "0/0"
@@ -607,7 +616,7 @@ install_mas_from_array() {
   fi
   
   local entry app_id app_name
-  for entry in "${arr[@]}"; do
+  for entry in "${apps[@]}"; do
     [[ -z "$entry" ]] && continue
     
     app_id="${entry%%|*}"
@@ -633,10 +642,11 @@ install_mas_from_array() {
 }
 
 # Configure dock from array
-configure_dock_from_array() {
-  local -n arr=$1
+# Usage: configure_dock "${DOCK_ITEMS[@]}"
+configure_dock() {
+  local items=("$@")
   local success_count=0
-  local total=${#arr[@]}
+  local total=${#items[@]}
   
   if [[ $total -eq 0 ]]; then
     echo "0/0"
@@ -662,7 +672,7 @@ configure_dock_from_array() {
   log_success "Cleared dock items"
   
   local item
-  for item in "${arr[@]}"; do
+  for item in "${items[@]}"; do
     [[ -z "$item" ]] && continue
     
     if [[ "$item" == "SPACER" ]]; then
@@ -1155,7 +1165,7 @@ main() {
   if [[ ${#BREW_FORMULAE[@]} -eq 0 ]]; then
     step_skip "none configured"
   else
-    result=$(install_brew_formulae_from_array BREW_FORMULAE)
+    result=$(install_brew_formulae "${BREW_FORMULAE[@]}")
     if [[ $? -eq 0 ]]; then
       step_ok "$result"
     else
@@ -1170,7 +1180,7 @@ main() {
   if [[ ${#BREW_CASKS[@]} -eq 0 ]]; then
     step_skip "none configured"
   else
-    result=$(install_brew_casks_from_array BREW_CASKS)
+    result=$(install_brew_casks "${BREW_CASKS[@]}")
     if [[ $? -eq 0 ]]; then
       step_ok "$result"
     else
@@ -1191,7 +1201,7 @@ main() {
     step_skip "not signed in"
     log_skip "App Store apps (Apple ID not signed in)"
   else
-    result=$(install_mas_from_array MAS_APPS)
+    result=$(install_mas_apps "${MAS_APPS[@]}")
     if [[ $? -eq 0 ]]; then
       step_ok "$result"
     else
@@ -1221,12 +1231,12 @@ main() {
   # -------------------------------------------------------------------------
   begin_step "Applying user defaults"
   if [[ "$REVERT_DEFAULTS" == "true" ]]; then
-    result=$(revert_defaults_from_array DEFAULTS_USER false)
+    result=$(revert_defaults false "${DEFAULTS_USER[@]}")
     step_ok "reverted $result"
   else
     # Also unhide ~/Library
     unhide_library
-    result=$(apply_defaults_from_array DEFAULTS_USER false)
+    result=$(apply_defaults false "${DEFAULTS_USER[@]}")
     if [[ $? -eq 0 ]]; then
       step_ok "$result"
     else
@@ -1242,11 +1252,11 @@ main() {
     step_skip "none configured"
   elif [[ "$REVERT_DEFAULTS" == "true" ]]; then
     ensure_sudo
-    result=$(revert_defaults_from_array DEFAULTS_ADMIN true)
+    result=$(revert_defaults true "${DEFAULTS_ADMIN[@]}")
     step_ok "reverted $result"
   else
     ensure_sudo
-    result=$(apply_defaults_from_array DEFAULTS_ADMIN true)
+    result=$(apply_defaults true "${DEFAULTS_ADMIN[@]}")
     if [[ $? -eq 0 ]]; then
       step_ok "$result"
     else
@@ -1265,7 +1275,7 @@ main() {
     step_skip "dockutil not installed"
     log_skip "Dock configuration (dockutil not installed)"
   else
-    result=$(configure_dock_from_array DOCK_ITEMS)
+    result=$(configure_dock "${DOCK_ITEMS[@]}")
     step_ok "$result items"
   fi
   
