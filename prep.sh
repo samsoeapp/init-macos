@@ -497,17 +497,29 @@ install_brew_formulae_from_array() {
     return 0
   fi
   
-  if ! command -v brew >/dev/null 2>&1; then
+  # Try to find brew if not in PATH
+  local brew_cmd=""
+  if command -v brew >/dev/null 2>&1; then
+    brew_cmd="brew"
+  elif [[ -x /opt/homebrew/bin/brew ]]; then
+    brew_cmd="/opt/homebrew/bin/brew"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    brew_cmd="/usr/local/bin/brew"
+  else
     log_warn "Homebrew not installed, skipping formulae"
     echo "0/$total"
     return 1
   fi
   
+  log_verbose "Using brew at: $brew_cmd"
+  log_verbose "Installing formulae: ${arr[*]}"
+  
   local formula
   for formula in "${arr[@]}"; do
     [[ -z "$formula" ]] && continue
     
-    if brew install "$formula" >> "$LOG_FILE" 2>&1; then
+    log_verbose "Installing formula: $formula"
+    if "$brew_cmd" install "$formula" >> "$LOG_FILE" 2>&1; then
       log_success "Install formula: $formula"
       ((success_count++))
     else
@@ -532,17 +544,29 @@ install_brew_casks_from_array() {
     return 0
   fi
   
-  if ! command -v brew >/dev/null 2>&1; then
+  # Try to find brew if not in PATH
+  local brew_cmd=""
+  if command -v brew >/dev/null 2>&1; then
+    brew_cmd="brew"
+  elif [[ -x /opt/homebrew/bin/brew ]]; then
+    brew_cmd="/opt/homebrew/bin/brew"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    brew_cmd="/usr/local/bin/brew"
+  else
     log_warn "Homebrew not installed, skipping casks"
     echo "0/$total"
     return 1
   fi
   
+  log_verbose "Using brew at: $brew_cmd"
+  log_verbose "Installing casks: ${arr[*]}"
+  
   local cask
   for cask in "${arr[@]}"; do
     [[ -z "$cask" ]] && continue
     
-    if brew install --cask "$cask" >> "$LOG_FILE" 2>&1; then
+    log_verbose "Installing cask: $cask"
+    if "$brew_cmd" install --cask "$cask" >> "$LOG_FILE" 2>&1; then
       log_success "Install cask: $cask"
       ((success_count++))
     else
@@ -568,7 +592,15 @@ install_mas_from_array() {
     return 0
   fi
   
-  if ! command -v mas >/dev/null 2>&1; then
+  # Try to find mas if not in PATH
+  local mas_cmd=""
+  if command -v mas >/dev/null 2>&1; then
+    mas_cmd="mas"
+  elif [[ -x /opt/homebrew/bin/mas ]]; then
+    mas_cmd="/opt/homebrew/bin/mas"
+  elif [[ -x /usr/local/bin/mas ]]; then
+    mas_cmd="/usr/local/bin/mas"
+  else
     log_warn "mas not installed, skipping App Store apps"
     echo "0/$total"
     return 1
@@ -587,7 +619,7 @@ install_mas_from_array() {
       continue
     fi
     
-    if mas install "$app_id" >> "$LOG_FILE" 2>&1; then
+    if "$mas_cmd" install "$app_id" >> "$LOG_FILE" 2>&1; then
       log_success "Install App Store: $app_name"
       ((success_count++))
     else
@@ -611,14 +643,22 @@ configure_dock_from_array() {
     return 0
   fi
   
-  if ! command -v dockutil >/dev/null 2>&1; then
+  # Try to find dockutil if not in PATH
+  local dockutil_cmd=""
+  if command -v dockutil >/dev/null 2>&1; then
+    dockutil_cmd="dockutil"
+  elif [[ -x /opt/homebrew/bin/dockutil ]]; then
+    dockutil_cmd="/opt/homebrew/bin/dockutil"
+  elif [[ -x /usr/local/bin/dockutil ]]; then
+    dockutil_cmd="/usr/local/bin/dockutil"
+  else
     log_warn "dockutil not installed, skipping dock configuration"
     echo "0/$total"
     return 1
   fi
   
   # Clear existing dock items
-  dockutil --remove all --no-restart >> "$LOG_FILE" 2>&1
+  "$dockutil_cmd" --remove all --no-restart >> "$LOG_FILE" 2>&1
   log_success "Cleared dock items"
   
   local item
@@ -626,14 +666,14 @@ configure_dock_from_array() {
     [[ -z "$item" ]] && continue
     
     if [[ "$item" == "SPACER" ]]; then
-      if dockutil --add '' --type spacer --section apps --no-restart >> "$LOG_FILE" 2>&1; then
+      if "$dockutil_cmd" --add '' --type spacer --section apps --no-restart >> "$LOG_FILE" 2>&1; then
         log_success "Add dock spacer"
         ((success_count++))
       else
         log_warn "Add dock spacer"
       fi
     elif [[ -e "$item" ]]; then
-      if dockutil --add "$item" --no-restart >> "$LOG_FILE" 2>&1; then
+      if "$dockutil_cmd" --add "$item" --no-restart >> "$LOG_FILE" 2>&1; then
         log_success "Add dock item: $item"
         ((success_count++))
       else
@@ -684,9 +724,18 @@ check_appleid_signed_in() {
     return 0  # Signed in
   fi
   
-  # Alternative check using mas
+  # Alternative check using mas (try to find it if not in PATH)
+  local mas_cmd=""
   if command -v mas >/dev/null 2>&1; then
-    if mas account &>/dev/null 2>&1; then
+    mas_cmd="mas"
+  elif [[ -x /opt/homebrew/bin/mas ]]; then
+    mas_cmd="/opt/homebrew/bin/mas"
+  elif [[ -x /usr/local/bin/mas ]]; then
+    mas_cmd="/usr/local/bin/mas"
+  fi
+  
+  if [[ -n "$mas_cmd" ]]; then
+    if "$mas_cmd" account &>/dev/null 2>&1; then
       return 0  # Signed in
     fi
   fi
@@ -769,11 +818,20 @@ install_homebrew() {
     return 1
   fi
   
-  # Add Homebrew to PATH for this session
+  # Add Homebrew to PATH for this session (export to ensure subshells inherit)
   if [[ -x /opt/homebrew/bin/brew ]]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
+    export PATH="/opt/homebrew/bin:$PATH"
   elif [[ -x /usr/local/bin/brew ]]; then
     eval "$(/usr/local/bin/brew shellenv)"
+    export PATH="/usr/local/bin:$PATH"
+  fi
+  
+  # Verify brew is now accessible
+  if command -v brew >/dev/null 2>&1; then
+    log_verbose "Homebrew PATH configured: $(command -v brew)"
+  else
+    log_warn "Homebrew installed but not in PATH"
   fi
   
   return 0
@@ -1126,7 +1184,7 @@ main() {
   begin_step "Installing App Store apps"
   if [[ ${#MAS_APPS[@]} -eq 0 ]]; then
     step_skip "none configured"
-  elif ! command -v mas >/dev/null 2>&1; then
+  elif ! command -v mas >/dev/null 2>&1 && [[ ! -x /opt/homebrew/bin/mas ]] && [[ ! -x /usr/local/bin/mas ]]; then
     step_skip "mas not installed"
     log_skip "App Store apps (mas not installed)"
   elif ! check_appleid_signed_in; then
@@ -1203,7 +1261,7 @@ main() {
   filter_dock_items
   if [[ ${#DOCK_ITEMS[@]} -eq 0 ]]; then
     step_skip "no items configured"
-  elif ! command -v dockutil >/dev/null 2>&1; then
+  elif ! command -v dockutil >/dev/null 2>&1 && [[ ! -x /opt/homebrew/bin/dockutil ]] && [[ ! -x /usr/local/bin/dockutil ]]; then
     step_skip "dockutil not installed"
     log_skip "Dock configuration (dockutil not installed)"
   else
