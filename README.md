@@ -3,6 +3,21 @@
 Modular macOS setup script with array-driven configuration. Installs Homebrew packages, 
 App Store apps, applies system defaults, configures the Dock, and sets the default browser.
 
+## One-Liner Installation
+
+Run directly from the web without cloning:
+
+```bash
+# Default profile
+curl -fsSL https://raw.githubusercontent.com/samsoeapp/init-macos/main/prep.sh | bash
+
+# With a specific client profile
+curl -fsSL https://raw.githubusercontent.com/samsoeapp/init-macos/main/prep.sh | bash -s -- --client acme
+
+# Revert all defaults
+curl -fsSL https://raw.githubusercontent.com/samsoeapp/init-macos/main/prep.sh | bash -s -- --revert
+```
+
 ## Quick Start
 
 ```bash
@@ -14,16 +29,6 @@ App Store apps, applies system defaults, configures the Dock, and sets the defau
 
 # Revert all defaults to system defaults
 ./prep.sh --revert
-```
-
-## One-liner Installation
-
-```bash
-# Default profile
-curl -fsSL https://raw.githubusercontent.com/samsoeapp/macos/main/macos-setup-client/prep.sh | bash
-
-# With client profile
-curl -fsSL https://raw.githubusercontent.com/samsoeapp/macos/main/macos-setup-client/prep.sh | bash -s -- --client acme
 ```
 
 ## What It Does
