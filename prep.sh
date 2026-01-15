@@ -13,6 +13,11 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
+# Version (update this with each commit: V1.XX where XX = commit count)
+# -----------------------------------------------------------------------------
+VERSION="V1.07"
+
+# -----------------------------------------------------------------------------
 # Shell Options
 # -----------------------------------------------------------------------------
 set -u -o pipefail
@@ -1167,14 +1172,21 @@ show_summary() {
   printf "\nLog file: %s\n" "$LOG_FILE"
 }
 
+show_version() {
+  printf "macOS Setup Script %s\n" "$VERSION"
+}
+
 show_usage() {
   cat << EOF
+macOS Setup Script $VERSION
+
 Usage: $(basename "$0") [OPTIONS] [CLIENT_NAME]
 
 Options:
   --revert               Revert defaults set by this script
   --client NAME          Apply client profile (default: default)
   --accept-xcode-license Accept Xcode license after installation
+  -v, --version          Show version number
   -h, --help             Show this help message
 
 Client Profiles:
@@ -1216,6 +1228,10 @@ parse_args() {
         ACCEPT_XCODE_LICENSE=true
         shift
         ;;
+      -v|--version)
+        show_version
+        exit 0
+        ;;
       -h|--help)
         show_usage
         exit 0
@@ -1255,14 +1271,14 @@ main() {
   
   # Initialize log file
   mkdir -p "$(dirname "$LOG_FILE")"
-  printf "macOS Setup Script - Started %s\n" "$(date)" > "$LOG_FILE"
+  printf "macOS Setup Script %s - Started %s\n" "$VERSION" "$(date)" > "$LOG_FILE"
   printf "Client Profile: %s\n" "$CLIENT_PROFILE" >> "$LOG_FILE"
   printf "Revert Mode: %s\n\n" "$REVERT_DEFAULTS" >> "$LOG_FILE"
   
   # Print header
   printf "\n"
-  printf "macOS Setup Script\n"
-  printf "==================\n"
+  printf "macOS Setup Script %s\n" "$VERSION"
+  printf "========================\n"
   printf "Log file: %s\n\n" "$LOG_FILE"
   
   # -------------------------------------------------------------------------
