@@ -314,15 +314,15 @@ init_sudo() {
   log_to_file "Sudo credentials obtained successfully"
   
   # Step 3: Keep sudo timestamp alive while the script runs
-  # This background process refreshes sudo every 50 seconds
+  # This background process refreshes sudo every 30 seconds
   # and exits when the parent script exits
   (
     while true; do
-      # Refresh sudo timestamp
-      sudo -n true >/dev/null 2>&1 || exit 0
-      sleep 50
+      sleep 30
       # Check if parent script is still running
       kill -0 "$$" 2>/dev/null || exit 0
+      # Refresh sudo timestamp (use -v to extend, not just validate)
+      sudo -v >/dev/null 2>&1 || exit 0
     done
   ) &
   SUDO_KEEPALIVE_PID=$!
@@ -572,6 +572,9 @@ install_brew_casks() {
   local cask
   for cask in "${casks[@]}"; do
     [[ -z "$cask" ]] && continue
+    
+    # Refresh sudo before each cask install (some casks run pkg installers that need sudo)
+    sudo -v >/dev/null 2>&1 || true
     
     log_verbose "Installing cask: $cask"
     if "$brew_cmd" install --cask "$cask" >> "$LOG_FILE" 2>&1; then
