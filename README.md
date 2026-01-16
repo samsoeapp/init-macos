@@ -151,7 +151,7 @@ Run with: `./prep.sh --client acme`
 Clean step-by-step progress with status indicators:
 
 ```
-macOS Setup Script V1.13
+macOS Setup Script V1.14
 ========================
 Log file: /Users/user/Downloads/prep-20260115-143022.log
 
