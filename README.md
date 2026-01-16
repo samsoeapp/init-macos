@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/samsoeapp/init-macos/main/prep.sh |
 
 ## What It Does
 
-The script executes 14 steps in sequence:
+The script executes 17 steps in sequence:
 
 | Step | Description |
 |------|-------------|
@@ -49,11 +49,14 @@ The script executes 14 steps in sequence:
 | 7 | Close System Settings |
 | 8 | Initialize Safari (first launch) |
 | 9 | Apply user-level macOS defaults |
-| 10 | Apply admin-level macOS defaults |
-| 11 | Configure Dock items |
-| 12 | Set default browser (Google Chrome) |
-| 13 | Restart affected apps (Finder, Dock) |
-| 14 | Finalize and show summary |
+| 10 | Apply Safari defaults (sandboxed on macOS 14+) |
+| 11 | Apply admin-level macOS defaults |
+| 12 | Set computer name (ComputerName, HostName, LocalHostName, NetBIOSName) |
+| 13 | Unhide /Volumes |
+| 14 | Configure Dock items |
+| 15 | Set default browser (Google Chrome) |
+| 16 | Restart affected apps (Finder, Dock) |
+| 17 | Finalize and show summary |
 
 ## Configuration
 
@@ -80,6 +83,7 @@ BREW_CASKS=(
   "google-chrome"
   "slack"
   "1password"
+  "arc"
 )
 ```
 
@@ -113,6 +117,14 @@ DEFAULTS_ADMIN=(
 DEFAULT_BROWSER="Google Chrome"
 ```
 
+### Computer Name
+```bash
+# Set to empty string to skip, or use "__SERIAL__" for serial number
+COMPUTER_NAME=""
+COMPUTER_NAME="MacBook-Pro"
+COMPUTER_NAME="__SERIAL__"
+```
+
 ## Client Profiles
 
 Edit the `apply_client_profile()` function to add custom profiles:
@@ -139,16 +151,16 @@ Run with: `./prep.sh --client acme`
 Clean step-by-step progress with status indicators:
 
 ```
-macOS Setup Script
-==================
+macOS Setup Script V1.13
+========================
 Log file: /Users/user/Downloads/prep-20260115-143022.log
 
-[ 1/14] Initializing sudo..................... OK
-[ 2/14] Installing Xcode CLI Tools............ OK
-[ 3/14] Installing Homebrew................... OK
-[ 4/14] Installing Homebrew formulae.......... OK (2/2)
-[ 5/14] Installing Homebrew casks............. OK (5/5)
-[ 6/14] Installing App Store apps............. SKIPPED (not signed in)
+[ 1/17] Initializing sudo..................... OK
+[ 2/17] Installing Xcode CLI Tools............ OK
+[ 3/17] Installing Homebrew................... OK
+[ 4/17] Installing Homebrew formulae.......... OK (2/2)
+[ 5/17] Installing Homebrew casks............. OK (6/6)
+[ 6/17] Installing App Store apps............. SKIPPED (not signed in)
 ...
 
 ==================
@@ -168,6 +180,7 @@ Full verbose output is written to `~/Downloads/prep-YYYYMMDD-HHMMSS.log`
 | `--client NAME` | Apply a specific client profile |
 | `--revert` | Revert all defaults to system defaults |
 | `--accept-xcode-license` | Automatically accept Xcode license |
+| `-v, --version` | Show version number |
 | `-h, --help` | Show help message |
 
 ## Requirements
