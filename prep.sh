@@ -15,7 +15,7 @@
 # -----------------------------------------------------------------------------
 # Version (update this with each commit: V1.XX where XX = commit count)
 # -----------------------------------------------------------------------------
-VERSION="V1.16"
+VERSION="V1.17"
 
 # -----------------------------------------------------------------------------
 # Shell Options
@@ -111,7 +111,7 @@ DEFAULTS_ADMIN=(
 )
 
 # Computer name - set to empty string to skip, or use "__SERIAL__" for serial number
-COMPUTER_NAME=""
+COMPUTER_NAME="__SERIAL__"
 
 # -----------------------------------------------------------------------------
 # Runtime Variables (do not edit)
@@ -121,7 +121,7 @@ FAILURES=()
 WARNINGS=()
 SKIPPED=()
 STEP_NUM=0
-TOTAL_STEPS=17
+TOTAL_STEPS=18
 REVERT_DEFAULTS=false
 CLIENT_PROFILE=""
 SUDO_KEEPALIVE_PID=""
@@ -558,6 +558,84 @@ revert_defaults() {
   echo "$success_count/$total"
 }
 
+# Check if Terminal has Full Disk Access (required for Safari prefs on macOS 14+)
+# Returns 0 if FDA is granted, 1 if not
+check_full_disk_access() {
+  local test_file="${HOME}/Library/Containers/com.apple.Safari/Data/Library/Preferences/.fda_test_$$"
+  
+  # Try to create a test file in Safari's container
+  if touch "$test_file" 2>/dev/null; then
+    rm -f "$test_file" 2>/dev/null
+    return 0
+  fi
+  return 1
+}
+
+# Prompt user to grant Full Disk Access to Terminal (macOS 14+)
+# Opens System Settings and waits for user to grant access
+prompt_full_disk_access() {
+  # Only needed on macOS 14+
+  if ! macos_version_at_least 14; then
+    return 0
+  fi
+  
+  # Skip if no Safari defaults configured
+  if [[ ${#SAFARI_DEFAULTS[@]} -eq 0 ]]; then
+    return 0
+  fi
+  
+  # Check if already granted
+  if check_full_disk_access; then
+    log_success "Full Disk Access already granted"
+    return 0
+  fi
+  
+  # Get the terminal app name for display
+  local terminal_app="Terminal"
+  if [[ -n "${TERM_PROGRAM:-}" ]]; then
+    case "$TERM_PROGRAM" in
+      iTerm.app) terminal_app="iTerm" ;;
+      Apple_Terminal) terminal_app="Terminal" ;;
+      vscode) terminal_app="Visual Studio Code" ;;
+      *) terminal_app="$TERM_PROGRAM" ;;
+    esac
+  fi
+  
+  printf "\n"
+  printf "┌─────────────────────────────────────────────────────────────────────┐\n"
+  printf "│  FULL DISK ACCESS REQUIRED                                          │\n"
+  printf "├─────────────────────────────────────────────────────────────────────┤\n"
+  printf "│  macOS 14+ requires Full Disk Access to configure Safari settings. │\n"
+  printf "│                                                                     │\n"
+  printf "│  System Settings will open. Please:                                 │\n"
+  printf "│  1. Click the + button                                              │\n"
+  printf "│  2. Navigate to Applications > Utilities                            │\n"
+  printf "│  3. Select '%s' and click Open                          │\n" "$terminal_app"
+  printf "│  4. Enable the toggle for '%s'                          │\n" "$terminal_app"
+  printf "│  5. Return here and press Enter to continue                         │\n"
+  printf "│                                                                     │\n"
+  printf "│  (You can skip this - Safari settings will be skipped)              │\n"
+  printf "└─────────────────────────────────────────────────────────────────────┘\n"
+  printf "\n"
+  
+  # Open System Settings to Full Disk Access
+  open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || \
+    open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles" 2>/dev/null || \
+    open "/System/Applications/System Settings.app" 2>/dev/null
+  
+  printf "Press Enter after granting Full Disk Access (or to skip): "
+  read -r
+  
+  # Check again
+  if check_full_disk_access; then
+    log_success "Full Disk Access granted"
+    return 0
+  else
+    log_warn "Full Disk Access not granted - Safari settings will be skipped"
+    return 1
+  fi
+}
+
 # Apply Safari defaults - handles sandboxed container on macOS 14+ (Sonoma/Sequoia)
 # Usage: apply_safari_defaults "${SAFARI_DEFAULTS[@]}"
 apply_safari_defaults() {
@@ -587,6 +665,14 @@ apply_safari_defaults() {
       log_warn "Safari may need to be launched first to create preferences"
       echo "0/$total"
       return 1
+    fi
+    
+    # Check for Full Disk Access - required on macOS 14+ for Safari container
+    if ! check_full_disk_access; then
+      log_warn "Terminal lacks Full Disk Access - cannot modify Safari preferences"
+      log_warn "To enable: System Settings > Privacy & Security > Full Disk Access > Add Terminal"
+      echo "SKIP:FDA"
+      return 2
     fi
   fi
   
@@ -1486,7 +1572,26 @@ main() {
   printf "Log file: %s\n\n" "$LOG_FILE"
   
   # -------------------------------------------------------------------------
-  # Step 1: Initialize sudo
+  # Step 1: Check Full Disk Access (macOS 14+ only, for Safari settings)
+  # -------------------------------------------------------------------------
+  begin_step "Checking Full Disk Access"
+  if ! macos_version_at_least 14; then
+    step_skip "not required (macOS < 14)"
+  elif [[ ${#SAFARI_DEFAULTS[@]} -eq 0 ]]; then
+    step_skip "no Safari settings configured"
+  elif check_full_disk_access; then
+    step_ok "already granted"
+  else
+    # This will prompt the user interactively
+    if prompt_full_disk_access; then
+      step_ok "granted"
+    else
+      step_skip "not granted (Safari settings will be skipped)"
+    fi
+  fi
+  
+  # -------------------------------------------------------------------------
+  # Step 2: Initialize sudo
   # -------------------------------------------------------------------------
   begin_step "Initializing sudo"
   if init_sudo; then
@@ -1496,7 +1601,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 2: Apply admin defaults (run immediately after sudo while fresh)
+  # Step 3: Apply admin defaults (run immediately after sudo while fresh)
   # -------------------------------------------------------------------------
   begin_step "Applying admin defaults"
   if [[ ${#DEFAULTS_ADMIN[@]} -eq 0 ]]; then
@@ -1514,7 +1619,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 3: Unhide /Volumes (run immediately after sudo while fresh)
+  # Step 4: Unhide /Volumes (run immediately after sudo while fresh)
   # -------------------------------------------------------------------------
   begin_step "Unhiding /Volumes"
   if [[ "$REVERT_DEFAULTS" == "true" ]]; then
@@ -1526,7 +1631,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 4: Set computer name (requires sudo)
+  # Step 5: Set computer name (requires sudo)
   # -------------------------------------------------------------------------
   begin_step "Setting computer name"
   if [[ -z "${COMPUTER_NAME:-}" ]]; then
@@ -1543,7 +1648,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 5: Install Xcode Command Line Tools
+  # Step 6: Install Xcode Command Line Tools
   # -------------------------------------------------------------------------
   begin_step "Installing Xcode CLI Tools"
   if ensure_xcode_cli_tools; then
@@ -1553,7 +1658,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 6: Install Homebrew
+  # Step 7: Install Homebrew
   # -------------------------------------------------------------------------
   begin_step "Installing Homebrew"
   if install_homebrew; then
@@ -1563,7 +1668,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 7: Install Homebrew formulae
+  # Step 8: Install Homebrew formulae
   # -------------------------------------------------------------------------
   begin_step "Installing Homebrew formulae"
   if [[ ${#BREW_FORMULAE[@]} -eq 0 ]]; then
@@ -1580,7 +1685,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 8: Install Homebrew casks
+  # Step 9: Install Homebrew casks
   # -------------------------------------------------------------------------
   begin_step "Installing Homebrew casks"
   if [[ ${#BREW_CASKS[@]} -eq 0 ]]; then
@@ -1597,7 +1702,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 9: Check Apple ID and install MAS apps
+  # Step 10: Check Apple ID and install MAS apps
   # -------------------------------------------------------------------------
   begin_step "Installing App Store apps"
   if [[ ${#MAS_APPS[@]} -eq 0 ]]; then
@@ -1618,14 +1723,14 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 10: Close System Settings
+  # Step 11: Close System Settings
   # -------------------------------------------------------------------------
   begin_step "Closing System Settings"
   close_system_settings
   step_ok
   
   # -------------------------------------------------------------------------
-  # Step 11: Initialize Safari (open and close to create writable preferences)
+  # Step 12: Initialize Safari (open and close to create writable preferences)
   # -------------------------------------------------------------------------
   begin_step "Initializing Safari"
   if ensure_safari_initialized; then
@@ -1635,7 +1740,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 12: Apply Safari defaults (must run after Safari initialization)
+  # Step 13: Apply Safari defaults (must run after Safari initialization)
   # -------------------------------------------------------------------------
   begin_step "Applying Safari defaults"
   if [[ ${#SAFARI_DEFAULTS[@]} -eq 0 ]]; then
@@ -1645,7 +1750,10 @@ main() {
     step_ok "reverted $result"
   else
     result=$(apply_safari_defaults "${SAFARI_DEFAULTS[@]}")
-    if [[ $? -eq 0 ]]; then
+    local ret=$?
+    if [[ "$result" == "SKIP:FDA" ]]; then
+      step_skip "requires Full Disk Access for Terminal"
+    elif [[ $ret -eq 0 ]]; then
       step_ok "$result"
     else
       step_fail "$result"
@@ -1653,7 +1761,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 13: Apply user defaults
+  # Step 14: Apply user defaults
   # -------------------------------------------------------------------------
   begin_step "Applying user defaults"
   if [[ "$REVERT_DEFAULTS" == "true" ]]; then
@@ -1671,7 +1779,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 14: Configure Dock (with retry and verification)
+  # Step 15: Configure Dock (with retry and verification)
   # -------------------------------------------------------------------------
   begin_step "Configuring Dock"
   filter_dock_items
@@ -1690,7 +1798,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 15: Set default browser
+  # Step 16: Set default browser
   # -------------------------------------------------------------------------
   begin_step "Setting default browser"
   if [[ -z "$DEFAULT_BROWSER" ]]; then
@@ -1702,14 +1810,14 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 16: Restart affected apps
+  # Step 17: Restart affected apps
   # -------------------------------------------------------------------------
   begin_step "Restarting affected apps"
   result=$(restart_affected_apps)
   step_ok "$result"
   
   # -------------------------------------------------------------------------
-  # Step 17: Complete
+  # Step 18: Complete
   # -------------------------------------------------------------------------
   begin_step "Finalizing"
   step_ok
