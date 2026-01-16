@@ -15,7 +15,7 @@
 # -----------------------------------------------------------------------------
 # Version (update this with each commit: V1.XX where XX = commit count)
 # -----------------------------------------------------------------------------
-VERSION="V1.14"
+VERSION="V1.15"
 
 # -----------------------------------------------------------------------------
 # Shell Options
@@ -365,6 +365,7 @@ init_sudo() {
     done
   ) &
   SUDO_KEEPALIVE_PID=$!
+  disown "$SUDO_KEEPALIVE_PID"
   
   SUDO_INITIALIZED=true
   log_success "Sudo initialized and keepalive started (PID: $SUDO_KEEPALIVE_PID)"
@@ -387,20 +388,33 @@ ensure_sudo() {
 }
 
 cleanup_sudo() {
+  # Suppress job control messages (prevents "Terminated" output)
+  set +m 2>/dev/null || true
+  
+  local cleaned=false
+  
   # Kill the keepalive background process
   if [[ -n "${SUDO_KEEPALIVE_PID:-}" ]]; then
     kill "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1 || true
+    wait "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
     log_to_file "Sudo keepalive process stopped"
+    cleaned=true
   fi
   # Securely remove the password file
   if [[ -n "${SUDO_PASSWORD_FILE:-}" && -f "$SUDO_PASSWORD_FILE" ]]; then
     rm -f "$SUDO_PASSWORD_FILE" 2>/dev/null || true
     log_to_file "Sudo password file removed"
+    cleaned=true
   fi
   # Invalidate sudo timestamp
   if command -v sudo >/dev/null 2>&1; then
     sudo -k >/dev/null 2>&1 || true
     log_to_file "Sudo timestamp invalidated"
+  fi
+  
+  # Show clean terminal message if we cleaned something
+  if [[ "$cleaned" == "true" ]]; then
+    printf "\n\033[0;32m[OK]\033[0m Cleanup complete (sudo credentials cleared)\n"
   fi
 }
 
