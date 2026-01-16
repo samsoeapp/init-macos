@@ -15,7 +15,7 @@
 # -----------------------------------------------------------------------------
 # Version (update this with each commit: V1.XX where XX = commit count)
 # -----------------------------------------------------------------------------
-VERSION="V1.15"
+VERSION="V1.16"
 
 # -----------------------------------------------------------------------------
 # Shell Options
@@ -1133,25 +1133,27 @@ close_system_settings() {
 
 ensure_safari_initialized() {
   local safari_container="${HOME}/Library/Containers/com.apple.Safari"
+  local safari_prefs="${safari_container}/Data/Library/Preferences/com.apple.Safari.plist"
   
-  if [[ -d "$safari_container" ]]; then
-    log_success "Safari already initialized"
-    return 0
-  fi
-  
-  log_verbose "Initializing Safari..."
+  # Always open and close Safari to ensure preferences are writable
+  # Even if container exists, the plist may not be in a writable state
+  log_verbose "Initializing Safari (open/close cycle for writable preferences)..."
   
   # Launch Safari
   open -a "Safari" >> "$LOG_FILE" 2>&1 || true
   sleep 3
   
-  # Quit Safari
+  # Quit Safari gracefully
   osascript -e 'tell application "Safari" to quit' >> "$LOG_FILE" 2>&1 || true
   sleep 2
   
-  if [[ -d "$safari_container" ]]; then
-    log_success "Safari initialized"
+  # Verify the preferences file exists and is writable
+  if [[ -f "$safari_prefs" ]]; then
+    log_success "Safari initialized (preferences file ready)"
     return 0
+  elif [[ -d "$safari_container" ]]; then
+    log_warn "Safari container exists but preferences file not found"
+    return 1
   else
     log_warn "Safari container not created"
     return 1
@@ -1494,7 +1496,54 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 2: Install Xcode Command Line Tools
+  # Step 2: Apply admin defaults (run immediately after sudo while fresh)
+  # -------------------------------------------------------------------------
+  begin_step "Applying admin defaults"
+  if [[ ${#DEFAULTS_ADMIN[@]} -eq 0 ]]; then
+    step_skip "none configured"
+  elif [[ "$REVERT_DEFAULTS" == "true" ]]; then
+    result=$(revert_defaults true "${DEFAULTS_ADMIN[@]}")
+    step_ok "reverted $result"
+  else
+    result=$(apply_defaults true "${DEFAULTS_ADMIN[@]}")
+    if [[ $? -eq 0 ]]; then
+      step_ok "$result"
+    else
+      step_fail "$result"
+    fi
+  fi
+  
+  # -------------------------------------------------------------------------
+  # Step 3: Unhide /Volumes (run immediately after sudo while fresh)
+  # -------------------------------------------------------------------------
+  begin_step "Unhiding /Volumes"
+  if [[ "$REVERT_DEFAULTS" == "true" ]]; then
+    step_skip "cannot revert"
+  elif unhide_volumes; then
+    step_ok
+  else
+    step_fail
+  fi
+  
+  # -------------------------------------------------------------------------
+  # Step 4: Set computer name (requires sudo)
+  # -------------------------------------------------------------------------
+  begin_step "Setting computer name"
+  if [[ -z "${COMPUTER_NAME:-}" ]]; then
+    step_skip "not configured"
+  elif [[ "$REVERT_DEFAULTS" == "true" ]]; then
+    step_skip "cannot revert"
+  else
+    result=$(set_computer_name)
+    if [[ $? -eq 0 ]]; then
+      step_ok "$result"
+    else
+      step_fail "$result"
+    fi
+  fi
+  
+  # -------------------------------------------------------------------------
+  # Step 5: Install Xcode Command Line Tools
   # -------------------------------------------------------------------------
   begin_step "Installing Xcode CLI Tools"
   if ensure_xcode_cli_tools; then
@@ -1504,7 +1553,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 3: Install Homebrew
+  # Step 6: Install Homebrew
   # -------------------------------------------------------------------------
   begin_step "Installing Homebrew"
   if install_homebrew; then
@@ -1514,7 +1563,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 4: Install Homebrew formulae
+  # Step 7: Install Homebrew formulae
   # -------------------------------------------------------------------------
   begin_step "Installing Homebrew formulae"
   if [[ ${#BREW_FORMULAE[@]} -eq 0 ]]; then
@@ -1531,7 +1580,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 5: Install Homebrew casks
+  # Step 8: Install Homebrew casks
   # -------------------------------------------------------------------------
   begin_step "Installing Homebrew casks"
   if [[ ${#BREW_CASKS[@]} -eq 0 ]]; then
@@ -1548,7 +1597,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 6: Check Apple ID and install MAS apps
+  # Step 9: Check Apple ID and install MAS apps
   # -------------------------------------------------------------------------
   begin_step "Installing App Store apps"
   if [[ ${#MAS_APPS[@]} -eq 0 ]]; then
@@ -1569,14 +1618,14 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 7: Close System Settings
+  # Step 10: Close System Settings
   # -------------------------------------------------------------------------
   begin_step "Closing System Settings"
   close_system_settings
   step_ok
   
   # -------------------------------------------------------------------------
-  # Step 8: Initialize Safari
+  # Step 11: Initialize Safari (open and close to create writable preferences)
   # -------------------------------------------------------------------------
   begin_step "Initializing Safari"
   if ensure_safari_initialized; then
@@ -1586,25 +1635,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 9: Apply user defaults
-  # -------------------------------------------------------------------------
-  begin_step "Applying user defaults"
-  if [[ "$REVERT_DEFAULTS" == "true" ]]; then
-    result=$(revert_defaults false "${DEFAULTS_USER[@]}")
-    step_ok "reverted $result"
-  else
-    # Also unhide ~/Library
-    unhide_library
-    result=$(apply_defaults false "${DEFAULTS_USER[@]}")
-    if [[ $? -eq 0 ]]; then
-      step_ok "$result"
-    else
-      step_fail "$result"
-    fi
-  fi
-  
-  # -------------------------------------------------------------------------
-  # Step 10: Apply Safari defaults (separate due to sandboxed container on macOS 14+)
+  # Step 12: Apply Safari defaults (must run after Safari initialization)
   # -------------------------------------------------------------------------
   begin_step "Applying Safari defaults"
   if [[ ${#SAFARI_DEFAULTS[@]} -eq 0 ]]; then
@@ -1622,52 +1653,21 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 11: Apply admin defaults
+  # Step 13: Apply user defaults
   # -------------------------------------------------------------------------
-  begin_step "Applying admin defaults"
-  if [[ ${#DEFAULTS_ADMIN[@]} -eq 0 ]]; then
-    step_skip "none configured"
-  elif [[ "$REVERT_DEFAULTS" == "true" ]]; then
-    ensure_sudo
-    result=$(revert_defaults true "${DEFAULTS_ADMIN[@]}")
+  begin_step "Applying user defaults"
+  if [[ "$REVERT_DEFAULTS" == "true" ]]; then
+    result=$(revert_defaults false "${DEFAULTS_USER[@]}")
     step_ok "reverted $result"
   else
-    ensure_sudo
-    result=$(apply_defaults true "${DEFAULTS_ADMIN[@]}")
+    # Also unhide ~/Library
+    unhide_library
+    result=$(apply_defaults false "${DEFAULTS_USER[@]}")
     if [[ $? -eq 0 ]]; then
       step_ok "$result"
     else
       step_fail "$result"
     fi
-  fi
-  
-  # -------------------------------------------------------------------------
-  # Step 12: Set computer name
-  # -------------------------------------------------------------------------
-  begin_step "Setting computer name"
-  if [[ -z "${COMPUTER_NAME:-}" ]]; then
-    step_skip "not configured"
-  elif [[ "$REVERT_DEFAULTS" == "true" ]]; then
-    step_skip "cannot revert"
-  else
-    result=$(set_computer_name)
-    if [[ $? -eq 0 ]]; then
-      step_ok "$result"
-    else
-      step_fail "$result"
-    fi
-  fi
-  
-  # -------------------------------------------------------------------------
-  # Step 13: Unhide /Volumes
-  # -------------------------------------------------------------------------
-  begin_step "Unhiding /Volumes"
-  if [[ "$REVERT_DEFAULTS" == "true" ]]; then
-    step_skip "cannot revert"
-  elif unhide_volumes; then
-    step_ok
-  else
-    step_fail
   fi
   
   # -------------------------------------------------------------------------

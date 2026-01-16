@@ -41,18 +41,18 @@ The script executes 17 steps in sequence:
 | Step | Description |
 |------|-------------|
 | 1 | Initialize sudo (request credentials, test, keep alive) |
-| 2 | Install Xcode Command Line Tools |
-| 3 | Install Homebrew |
-| 4 | Install Homebrew formulae (CLI tools) |
-| 5 | Install Homebrew casks (GUI apps) |
-| 6 | Install App Store apps (if signed in) |
-| 7 | Close System Settings |
-| 8 | Initialize Safari (first launch) |
-| 9 | Apply user-level macOS defaults |
-| 10 | Apply Safari defaults (sandboxed on macOS 14+) |
-| 11 | Apply admin-level macOS defaults |
-| 12 | Set computer name (ComputerName, HostName, LocalHostName, NetBIOSName) |
-| 13 | Unhide /Volumes |
+| 2 | Apply admin-level macOS defaults (immediately after sudo) |
+| 3 | Unhide /Volumes (immediately after sudo) |
+| 4 | Set computer name (ComputerName, HostName, LocalHostName, NetBIOSName) |
+| 5 | Install Xcode Command Line Tools |
+| 6 | Install Homebrew |
+| 7 | Install Homebrew formulae (CLI tools) |
+| 8 | Install Homebrew casks (GUI apps) |
+| 9 | Install App Store apps (if signed in) |
+| 10 | Close System Settings |
+| 11 | Initialize Safari (open/close to create writable preferences) |
+| 12 | Apply Safari defaults (sandboxed on macOS 14+) |
+| 13 | Apply user-level macOS defaults |
 | 14 | Configure Dock items |
 | 15 | Set default browser (Google Chrome) |
 | 16 | Restart affected apps (Finder, Dock) |
@@ -151,7 +151,7 @@ Run with: `./prep.sh --client acme`
 Clean step-by-step progress with status indicators:
 
 ```
-macOS Setup Script V1.15
+macOS Setup Script V1.16
 ========================
 Log file: /Users/user/Downloads/prep-20260115-143022.log
 
