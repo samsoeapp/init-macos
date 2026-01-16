@@ -15,7 +15,7 @@
 # -----------------------------------------------------------------------------
 # Version (update this with each commit: V1.XX where XX = commit count)
 # -----------------------------------------------------------------------------
-VERSION="V1.12"
+VERSION="V1.13"
 
 # -----------------------------------------------------------------------------
 # Shell Options
@@ -32,6 +32,7 @@ DEFAULT_BROWSER="Google Chrome"
 # Dock items - paths to applications (use "SPACER" for a spacer tile)
 DOCK_ITEMS=(
   "/Applications/Google Chrome.app"
+  "/Applications/Arc.app"
   "/Applications/Google Drive.app"
   "/Applications/1Password.app"
   "/Applications/WhatsApp.app"
@@ -106,9 +107,11 @@ SAFARI_DEFAULTS=(
 
 # macOS defaults (admin-level, requires sudo) - format: "domain|key|value|type"
 DEFAULTS_ADMIN=(
-  # Uncomment to enable admin defaults
-  # "/Library/Preferences/com.apple.loginwindow|AdminHostInfo|HostName|string"
+  "/Library/Preferences/com.apple.loginwindow|AdminHostInfo|HostName|string"
 )
+
+# Computer name - set to empty string to skip, or use "__SERIAL__" for serial number
+COMPUTER_NAME=""
 
 # -----------------------------------------------------------------------------
 # Runtime Variables (do not edit)
@@ -118,7 +121,7 @@ FAILURES=()
 WARNINGS=()
 SKIPPED=()
 STEP_NUM=0
-TOTAL_STEPS=15
+TOTAL_STEPS=17
 REVERT_DEFAULTS=false
 CLIENT_PROFILE=""
 SUDO_KEEPALIVE_PID=""
@@ -1150,6 +1153,77 @@ unhide_library() {
   fi
 }
 
+# Unhide /Volumes folder
+unhide_volumes() {
+  ensure_sudo
+  if sudo -n chflags nohidden /Volumes >> "$LOG_FILE" 2>&1; then
+    log_success "Unhide /Volumes"
+    return 0
+  else
+    log_error "Unhide /Volumes"
+    return 1
+  fi
+}
+
+# Set computer name (ComputerName, HostName, LocalHostName, NetBIOSName)
+set_computer_name() {
+  if [[ -z "${COMPUTER_NAME:-}" ]]; then
+    log_skip "No computer name configured"
+    return 0
+  fi
+  
+  local name="$COMPUTER_NAME"
+  
+  # Replace __SERIAL__ with actual serial number
+  if [[ "$name" == "__SERIAL__" ]]; then
+    name=$(ioreg -l | grep IOPlatformSerialNumber | sed 's/.*= "//' | sed 's/"//')
+    if [[ -z "$name" ]]; then
+      log_error "Could not retrieve serial number"
+      return 1
+    fi
+    log_verbose "Using serial number: $name"
+  fi
+  
+  ensure_sudo
+  local success=0
+  local failed=0
+  
+  if sudo -n scutil --set ComputerName "$name" >> "$LOG_FILE" 2>&1; then
+    log_success "Set ComputerName: $name"
+    ((success++))
+  else
+    log_error "Set ComputerName"
+    ((failed++))
+  fi
+  
+  if sudo -n scutil --set HostName "$name" >> "$LOG_FILE" 2>&1; then
+    log_success "Set HostName: $name"
+    ((success++))
+  else
+    log_error "Set HostName"
+    ((failed++))
+  fi
+  
+  if sudo -n scutil --set LocalHostName "$name" >> "$LOG_FILE" 2>&1; then
+    log_success "Set LocalHostName: $name"
+    ((success++))
+  else
+    log_error "Set LocalHostName"
+    ((failed++))
+  fi
+  
+  if sudo -n defaults write /Library/Preferences/SystemConfiguration/com.apple.smb.server NetBIOSName -string "$name" >> "$LOG_FILE" 2>&1; then
+    log_success "Set NetBIOSName: $name"
+    ((success++))
+  else
+    log_error "Set NetBIOSName"
+    ((failed++))
+  fi
+  
+  echo "$success/4"
+  return $failed
+}
+
 restart_affected_apps() {
   local restarted=0
   
@@ -1230,6 +1304,7 @@ apply_client_profile() {
         "google-chrome"
         "google-drive"
         "whatsapp"
+        "arc"
       )
       ;;
     # Add custom client profiles here:
@@ -1553,7 +1628,36 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 12: Configure Dock (with retry and verification)
+  # Step 12: Set computer name
+  # -------------------------------------------------------------------------
+  begin_step "Setting computer name"
+  if [[ -z "${COMPUTER_NAME:-}" ]]; then
+    step_skip "not configured"
+  elif [[ "$REVERT_DEFAULTS" == "true" ]]; then
+    step_skip "cannot revert"
+  else
+    result=$(set_computer_name)
+    if [[ $? -eq 0 ]]; then
+      step_ok "$result"
+    else
+      step_fail "$result"
+    fi
+  fi
+  
+  # -------------------------------------------------------------------------
+  # Step 13: Unhide /Volumes
+  # -------------------------------------------------------------------------
+  begin_step "Unhiding /Volumes"
+  if [[ "$REVERT_DEFAULTS" == "true" ]]; then
+    step_skip "cannot revert"
+  elif unhide_volumes; then
+    step_ok
+  else
+    step_fail
+  fi
+  
+  # -------------------------------------------------------------------------
+  # Step 14: Configure Dock (with retry and verification)
   # -------------------------------------------------------------------------
   begin_step "Configuring Dock"
   filter_dock_items
@@ -1572,7 +1676,7 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 13: Set default browser
+  # Step 15: Set default browser
   # -------------------------------------------------------------------------
   begin_step "Setting default browser"
   if [[ -z "$DEFAULT_BROWSER" ]]; then
@@ -1584,14 +1688,14 @@ main() {
   fi
   
   # -------------------------------------------------------------------------
-  # Step 14: Restart affected apps
+  # Step 16: Restart affected apps
   # -------------------------------------------------------------------------
   begin_step "Restarting affected apps"
   result=$(restart_affected_apps)
   step_ok "$result"
   
   # -------------------------------------------------------------------------
-  # Step 15: Complete
+  # Step 17: Complete
   # -------------------------------------------------------------------------
   begin_step "Finalizing"
   step_ok
